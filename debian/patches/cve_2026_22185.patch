@@ -1,0 +1,26 @@
+Description: Fix CVE-2026-22185: heap buffer underflow in mdb_load
+Author: Howard Chu <hyc@openldap.org>
+Origin: upstream
+Bug: https://security-tracker.debian.org/tracker/CVE-2026-22185
+Forwarded: not-needed
+---
+ libraries/liblmdb/mdb_load.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+Index: github-lmdb-22185/libraries/liblmdb/mdb_load.c
+===================================================================
+--- github-lmdb-22185.orig/libraries/liblmdb/mdb_load.c
++++ github-lmdb-22185/libraries/liblmdb/mdb_load.c
+@@ -208,6 +208,12 @@ badend:
+ 
+ 	c1 = buf->mv_data;
+ 	len = strlen((char *)c1);
++	if (!len) {
++		/* This can only happen with an intentionally invalid input
++		 * with a NUL byte after the leading SPACE
++		 */
++		goto badend;
++	}
+ 	l2 = len;
+ 
+ 	/* Is buffer too short? */

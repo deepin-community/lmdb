@@ -1,3 +1,9 @@
+lmdb (0.9.31-1deepin1) unstable; urgency=medium
+
+  * Fix CVE-2026-22185: heap buffer underflow in mdb_load
+
+ -- deepin-ci-robot <packages@deepin.org>  Sat, 25 Apr 2026 13:30:34 +0800
+
 lmdb (0.9.31-1) unstable; urgency=medium
 
   * New upstream version 0.9.31 (Closes: #952904)
