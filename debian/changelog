@@ -1,4 +1,9 @@
-lmdb (0.9.31-1) unstable; urgency=medium
+lmdb (0.9.31-1deepin1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Fix CVE-2019-16224: validate DB flags to prevent heap buffer overflow
+  * Fix CVE-2019-16226: validate node size in mdb_node_del
+  * Fix CVE-2019-16228: validate page size from data file
 
   * New upstream version 0.9.31 (Closes: #952904)
 

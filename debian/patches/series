@@ -1,2 +1,5 @@
 0001-Debian-quirks-to-make-shared-library-versioned.patch
 0002-Make-the-build-reproducible-by-turning-off-HTML_TIME.patch
+CVE-2019-16224-validate-db-flags.patch
+CVE-2019-16226-validate-node-del-size.patch
+CVE-2019-16228-validate-psize.patch
