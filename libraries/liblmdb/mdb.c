@@ -1040,6 +1040,16 @@ typedef struct MDB_db {
 #define VALID_FLAGS	(MDB_REVERSEKEY|MDB_DUPSORT|MDB_INTEGERKEY|MDB_DUPFIXED|\
 	MDB_INTEGERDUP|MDB_REVERSEDUP|MDB_CREATE)
 
+	/** Flags that are only valid when #MDB_DUPSORT is also set */
+#define DUPSORT_ONLY_FLAGS	(MDB_DUPFIXED|MDB_INTEGERDUP|MDB_REVERSEDUP)
+
+	/** Check db flags read from disk for invalid combinations.
+	 *	Returns 0 if valid, non-zero if corrupt.
+	 *	MDB_DUPFIXED, MDB_INTEGERDUP, MDB_REVERSEDUP require MDB_DUPSORT.
+	 */
+#define BAD_DB_FLAGS(f) \
+	(((f) & DUPSORT_ONLY_FLAGS) && !((f) & MDB_DUPSORT))
+
 	/** Handle for the DB used to track free pages. */
 #define	FREE_DBI	0
 	/** Handle for the default DB. */
@@ -2824,6 +2834,13 @@ mdb_txn_renew0(MDB_txn *txn)
 		rc = MDB_PANIC;
 	} else if (env->me_maxpg < txn->mt_next_pgno) {
 		rc = MDB_MAP_RESIZED;
+	} else if (BAD_DB_FLAGS(txn->mt_dbs[FREE_DBI].md_flags) ||
+		BAD_DB_FLAGS(txn->mt_dbs[MAIN_DBI].md_flags)) {
+		/* Reject corrupt flag combinations read from the meta page.
+		 * CVE-2019-16224: MDB_DUPFIXED without MDB_DUPSORT causes
+		 * P_LEAF2 pages that lead to use of uninitialized pointers.
+		 */
+		rc = MDB_INVALID;
 	} else {
 		return MDB_SUCCESS;
 	}
@@ -4434,6 +4451,13 @@ mdb_env_open2(MDB_env *env)
 	} else {
 		env->me_psize = meta.mm_psize;
 	}
+		/* Validate page size from the file.  A zero or non-power-of-2
+		 * value causes divide-by-zero or other undefined behavior.
+		 * CVE-2019-16228. */
+		if (!meta.mm_psize || (meta.mm_psize & (meta.mm_psize - 1)) ||
+			meta.mm_psize > MAX_PAGESIZE) {
+			return MDB_INVALID;
+		}
 
 	/* Was a mapsize configured? */
 	if (!env->me_mapsize) {
@@ -5675,6 +5699,8 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 					 */
 					if ((mc->mc_db->md_flags & PERSISTENT_FLAGS) != flags)
 						return MDB_INCOMPATIBLE;
+					if (BAD_DB_FLAGS(flags))
+						return MDB_INVALID;
 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
 				}
 				*mc->mc_dbflag &= ~DB_STALE;
@@ -7473,6 +7499,16 @@ mdb_node_del(MDB_cursor *mc, int ksize)
 	for (i = j = 0; i < numkeys; i++) {
 		if (i != indx) {
 			MP_PTRS(mp)[j] = MP_PTRS(mp)[i];
+
+	/* Validate that the node size is sane.  A crafted data.mdb with a
+	 * corrupt mn_hi field can produce an enormous sz via NODEDSZ(),
+	 * causing an out-of-bounds memmove.  CVE-2019-16226. */
+	if (sz > mc->mc_txn->mt_env->me_psize ||
+		ptr < MP_UPPER(mp) || ptr > mc->mc_txn->mt_env->me_psize) {
+		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
+		return;
+	}
+
 			if (MP_PTRS(mp)[i] < ptr)
 				MP_PTRS(mp)[j] += sz;
 			j++;
@@ -9789,7 +9825,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	char *namedup;
 	size_t len;
 
-	if (flags & ~VALID_FLAGS)
+	if ((flags & ~VALID_FLAGS) || BAD_DB_FLAGS(flags))
 		return EINVAL;
 	if (txn->mt_flags & MDB_TXN_BLOCKED)
 		return MDB_BAD_TXN;
@@ -9887,6 +9923,12 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 		txn->mt_dbiseqs[slot] = seq;
 
 		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
+		if (BAD_DB_FLAGS(txn->mt_dbs[slot].md_flags)) {
+			free(namedup);
+			txn->mt_dbxs[slot].md_name.mv_data = NULL;
+			txn->mt_dbxs[slot].md_name.mv_size = 0;
+			return MDB_INVALID;
+		}
 		*dbi = slot;
 		mdb_default_cmp(txn, slot);
 		if (!unused) {
